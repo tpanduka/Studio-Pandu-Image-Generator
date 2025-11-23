@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Character, GeneratedImage, UiAspectRatio } from './types';
 import { INITIAL_CHARACTERS } from './constants';
 import CharacterPanel from './components/CharacterPanel';
 import PromptPanel from './components/PromptPanel';
 import ResultsGrid from './components/ResultsGrid';
-import ApiKeyModal from './components/ApiKeyModal';
-import { generateCharacterImage, checkApiKey } from './services/geminiService';
+import { generateCharacterImage } from './services/geminiService';
 
 const App: React.FC = () => {
   const [characters, setCharacters] = useState<Character[]>(INITIAL_CHARACTERS);
@@ -13,24 +12,8 @@ const App: React.FC = () => {
   const [prompts, setPrompts] = useState<string[]>(['']);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [apiKeySet, setApiKeySet] = useState<boolean>(false);
-
-  useEffect(() => {
-    // Check initial key status
-    checkApiKey().then(setApiKeySet);
-  }, []);
 
   const handleGenerate = async () => {
-    if (!apiKeySet) {
-       // If somehow button enabled without key, trigger re-check or logic
-       const hasKey = await checkApiKey();
-       if (!hasKey) {
-           setApiKeySet(false);
-           return;
-       }
-       setApiKeySet(true);
-    }
-
     const validPrompts = prompts.filter(p => p.trim() !== '');
     if (validPrompts.length === 0) {
       alert("Please enter at least one prompt.");
@@ -52,8 +35,6 @@ const App: React.FC = () => {
     setIsGenerating(true);
 
     // Process sequentially to manage rate limits and ensure order
-    // Note: Promise.all might be too aggressive for high-res generation on some tiers,
-    // but sequential ensures the UI updates nicely card by card.
     for (let i = 0; i < newImages.length; i++) {
         const currentId = newImages[i].id;
         
@@ -78,12 +59,21 @@ const App: React.FC = () => {
             setGeneratedImages(prev => prev.map(img => 
                 img.id === currentId ? { ...img, status: 'success', imageUrl } : img
             ));
-        } catch (error) {
+        } catch (error: any) {
             console.error(`Generation failed for prompt ${i}`, error);
-            // Update error
+
+            // Update error status
             setGeneratedImages(prev => prev.map(img => 
                 img.id === currentId ? { ...img, status: 'error' } : img
             ));
+            
+            // Optionally break on auth errors to prevent spamming
+            const errorMsg = error.message || JSON.stringify(error);
+            if (errorMsg.includes('403') || errorMsg.includes('PERMISSION_DENIED')) {
+                setIsGenerating(false);
+                alert("Authorization Error: Please check your API Key configuration.");
+                return; 
+            }
         }
     }
 
@@ -92,8 +82,6 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-full bg-gray-900 text-gray-100 overflow-hidden font-sans">
-      {!apiKeySet && <ApiKeyModal onSuccess={() => setApiKeySet(true)} />}
-
       {/* Left Column: Control Panel */}
       <div className="w-[400px] flex flex-col border-r border-gray-800 bg-gray-900 flex-shrink-0 z-20 shadow-2xl">
         <div className="p-6 pb-2 border-b border-gray-800">

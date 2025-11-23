@@ -13,6 +13,12 @@ interface GenerateImageParams {
   aspectRatio: UiAspectRatio;
 }
 
+export const promptApiKey = async () => {
+  if ((window as any).aistudio) {
+    await (window as any).aistudio.openSelectKey();
+  }
+};
+
 export const generateCharacterImage = async (params: GenerateImageParams): Promise<string> => {
   try {
     // 1. Initialize Client (Must be done per request to catch fresh API keys if changed)
@@ -31,56 +37,51 @@ export const generateCharacterImage = async (params: GenerateImageParams): Promi
       },
     }));
 
-    // Add the prompt
+    // Add the prompt - explicitly requesting an image generation to ensure the model acts as an image generator
     parts.push({
-      text: params.prompt,
+      text: `Generate an image of ${params.prompt}`,
     });
 
     // 3. Call API
-    // Using gemini-3-pro-image-preview for high quality (4K supported) and reference image support.
+    // Using gemini-2.5-flash-image for broader access (Free Tier friendly).
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
+      model: 'gemini-2.5-flash-image',
       contents: {
         parts: parts,
       },
       config: {
         imageConfig: {
           aspectRatio: mapAspectRatioToApi(params.aspectRatio),
-          imageSize: '4K', // Requested in prompt
         },
       },
     });
 
     // 4. Parse Response
+    let textResponse = '';
+
     if (response.candidates && response.candidates.length > 0) {
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          const base64String = part.inlineData.data;
-          return `data:image/png;base64,${base64String}`;
+      const content = response.candidates[0].content;
+      if (content && content.parts) {
+        for (const part of content.parts) {
+          if (part.inlineData) {
+            const base64String = part.inlineData.data;
+            return `data:image/png;base64,${base64String}`;
+          }
+          if (part.text) {
+            textResponse += part.text;
+          }
         }
       }
+    }
+
+    // If we found text but no image, the model likely refused or misunderstood
+    if (textResponse) {
+      throw new Error(`Model returned text: ${textResponse.slice(0, 150)}...`);
     }
 
     throw new Error("No image data found in response");
   } catch (error) {
     console.error("Gemini API Error:", error);
     throw error;
-  }
-};
-
-// AI Studio Key Selection Helpers
-
-export const checkApiKey = async (): Promise<boolean> => {
-  if ((window as any).aistudio && (window as any).aistudio.hasSelectedApiKey) {
-    return await (window as any).aistudio.hasSelectedApiKey();
-  }
-  return false;
-};
-
-export const promptApiKey = async (): Promise<void> => {
-  if ((window as any).aistudio && (window as any).aistudio.openSelectKey) {
-    await (window as any).aistudio.openSelectKey();
-  } else {
-    console.warn("AI Studio environment not detected.");
   }
 };
